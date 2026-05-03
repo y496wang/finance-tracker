@@ -3,8 +3,7 @@ import useStore from '../../store';
 import { parseByBank } from '../../parsers/csv';
 import { scanGmail, DRIVE_SCOPE, initOAuth } from '../../parsers/gmail';
 import { extractPDFText, parsePDFByBank } from '../../parsers/pdf';
-import { parseWithClaude } from '../../parsers/claude';
-import { cad, uid, categorize } from '../../utils';
+import { cad } from '../../utils';
 
 const BANK_OPTIONS = [
   { value: 'cibc-chequing',   label: 'CIBC Chequing' },
@@ -55,7 +54,6 @@ export default function Import() {
   const accessToken     = useStore(s => s.accessToken);
   const driveToken      = useStore(s => s.driveToken);
   const clientId        = useStore(s => s.clientId);
-  const anthropicKey    = useStore(s => s.anthropicKey);
   const setDriveToken   = useStore(s => s.setDriveToken);
   const addTransactions = useStore(s => s.addTransactions);
   const showToast       = useStore(s => s.showToast);
@@ -103,43 +101,21 @@ export default function Import() {
     reader.readAsText(file);
   }
 
-  // ── PDF parsing ───────────────────────────────────────────────────────────
-  async function parseSinglePDF(file, account) {
-    const text = await extractPDFText(file);
-
-    if (anthropicKey) {
-      // Claude claude-opus-4-7 — system prompt cached after first call
-      const rows = await parseWithClaude(text, account, anthropicKey);
-      return rows.map(r => ({
-        id:          uid(),
-        date:        r.date,
-        description: r.description,
-        amount:      parseFloat(Number(r.amount).toFixed(2)),
-        category:    categorize(r.description),
-        account,
-        source:      'pdf',
-      }));
-    } else {
-      // Fallback: regex-based parser
-      return parsePDFByBank(text, bankKey);
-    }
-  }
-
+  // ── PDF parsing (multi-file) ──────────────────────────────────────────────
   async function processPDFFiles(files) {
     if (!files.length) return;
     setPdfProcessing(true);
     setPdfStatus('');
     setPdfPreview(null);
 
-    const account = ACCOUNT_LABELS[bankKey] || bankKey;
     const all = [];
-    const method = anthropicKey ? 'Claude AI' : 'regex parser';
 
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        setPdfStatus(`${method}: processing "${file.name}" (${i + 1} / ${files.length})…`);
-        const parsed = await parseSinglePDF(file, account);
+        setPdfStatus(`Processing "${file.name}" (${i + 1} / ${files.length})…`);
+        const text = await extractPDFText(file);
+        const parsed = parsePDFByBank(text, bankKey);
         all.push(...parsed);
       }
 
@@ -305,11 +281,7 @@ export default function Import() {
         <div className="flex between center mb-4" style={{ flexWrap: 'wrap', gap: '8px' }}>
           <div>
             <div className="card-title" style={{ marginBottom: '2px' }}>📑 PDF e-Statement Import</div>
-            <div className="text-muted text-sm">
-              {anthropicKey
-                ? '✨ Claude claude-opus-4-7 active — AI-powered extraction with prompt caching'
-                : 'Regex parser active — add an Anthropic API key in Settings to enable Claude AI'}
-            </div>
+            <div className="text-muted text-sm">Drop one or multiple PDFs at once · uses bank selected above</div>
           </div>
           <div style={{ fontSize: '12px', color: 'var(--muted)', textAlign: 'right' }}>
             Selected bank: <strong style={{ color: 'var(--text)' }}>{BANK_OPTIONS.find(o => o.value === bankKey)?.label}</strong>

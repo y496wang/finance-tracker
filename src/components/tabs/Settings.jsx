@@ -6,16 +6,13 @@ import { initOAuth } from '../../parsers/gmail';
 export default function Settings() {
   const monthlyIncome  = useStore(s => s.monthlyIncome);
   const clientId       = useStore(s => s.clientId);
-  const anthropicKey   = useStore(s => s.anthropicKey);
   const setMonthlyIncome = useStore(s => s.setMonthlyIncome);
   const setClientId      = useStore(s => s.setClientId);
-  const setAnthropicKey  = useStore(s => s.setAnthropicKey);
   const setAccessToken   = useStore(s => s.setAccessToken);
   const clearAll         = useStore(s => s.clearAll);
   const showToast        = useStore(s => s.showToast);
 
   const [income, setIncome]   = useState(monthlyIncome || '');
-  const [aKey,   setAKey]     = useState(anthropicKey || '');
   const [cid,    setCid]      = useState(clientId || '');
 
   function saveIncome() {
@@ -62,25 +59,6 @@ export default function Settings() {
             />
             <button className="btn btn-primary" onClick={saveIncome}>Save</button>
           </div>
-        </div>
-
-        {/* Anthropic API key */}
-        <div className="card">
-          <div className="card-title">Claude AI — PDF Parsing</div>
-          <p className="text-muted mb-4">
-            Uses <strong>claude-opus-4-7</strong> to extract transactions from PDF statements.
-            Get a key at <a href="https://console.anthropic.com" target="_blank" rel="noreferrer" style={{ color: 'var(--primary)' }}>console.anthropic.com</a>.
-            Your key is stored locally and sent only to Anthropic.
-          </p>
-          <label className="field-label">Anthropic API Key</label>
-          <input
-            type="password" placeholder="sk-ant-..." value={aKey}
-            onChange={e => setAKey(e.target.value)} className="w-full mb-2"
-          />
-          <button className="btn btn-primary mt-2" onClick={() => { setAnthropicKey(aKey.trim()); showToast('API key saved'); }}>
-            Save
-          </button>
-          {anthropicKey && <div className="text-green mt-2" style={{ fontSize: '13px' }}>✓ Key configured — Claude AI parsing is active</div>}
         </div>
 
         {/* Google OAuth */}

@@ -8,7 +8,6 @@ const useStore = create(
       transactions: [],
       monthlyIncome: 0,
       clientId: '',
-      anthropicKey: '',
 
       // ── Session ──
       accessToken: null,
@@ -51,7 +50,6 @@ const useStore = create(
       // ── Settings ──
       setMonthlyIncome: v  => set({ monthlyIncome: v }),
       setClientId:      v  => set({ clientId: v }),
-      setAnthropicKey:  v  => set({ anthropicKey: v }),
       setAccessToken:   v  => set({ accessToken: v }),
       setDriveToken:    v  => set({ driveToken: v }),
       clearAll() {
@@ -81,7 +79,6 @@ const useStore = create(
         transactions:  s.transactions,
         monthlyIncome: s.monthlyIncome,
         clientId:      s.clientId,
-        anthropicKey:  s.anthropicKey,
       }),
     }
   )
