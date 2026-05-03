@@ -2,10 +2,8 @@ import { uid, categorize } from '../utils';
 import { BANK_QUERIES } from '../constants';
 
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1';
-export const GMAIL_SCOPE = [
-  'https://www.googleapis.com/auth/gmail.readonly',
-  'https://www.googleapis.com/auth/drive.readonly',
-].join(' ');
+export const GMAIL_SCOPE  = 'https://www.googleapis.com/auth/gmail.readonly';
+export const DRIVE_SCOPE  = 'https://www.googleapis.com/auth/drive.readonly';
 
 function b64decode(data) {
   return atob(data.replace(/-/g, '+').replace(/_/g, '/'));
@@ -101,12 +99,12 @@ export async function scanGmail({ accessToken, fromDate, onProgress, transaction
   return { found, scanned };
 }
 
-export function initOAuth(clientId, onSuccess, onError) {
+export function initOAuth(clientId, onSuccess, onError, scope = GMAIL_SCOPE) {
   if (!clientId || typeof google === 'undefined') return null;
   try {
     return google.accounts.oauth2.initTokenClient({
       client_id: clientId,
-      scope: GMAIL_SCOPE,
+      scope,
       callback: r => {
         if (r.error) { onError(r.error); return; }
         onSuccess(r.access_token);
