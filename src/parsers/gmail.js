@@ -2,7 +2,10 @@ import { uid, categorize } from '../utils';
 import { BANK_QUERIES } from '../constants';
 
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1';
-export const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+export const GMAIL_SCOPE = [
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/drive.readonly',
+].join(' ');
 
 function b64decode(data) {
   return atob(data.replace(/-/g, '+').replace(/_/g, '/'));
