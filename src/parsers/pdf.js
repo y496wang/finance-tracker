@@ -51,6 +51,33 @@ function inferYear(text) {
   return m ? parseInt(m[1]) : new Date().getFullYear();
 }
 
+// Try to extract the statement period so we can map month → year correctly
+// for statements that span December → January.
+function inferPeriod(text) {
+  const m = text.match(
+    /(?:statement\s+period|period|from)[:\s]+([A-Za-z]+)\s+\d{1,2},?\s+(\d{4})\s*(?:to|-|–|—|through)\s*([A-Za-z]+)\s+\d{1,2},?\s+(\d{4})/i
+  );
+  if (!m) return null;
+  const startMon = MONTHS[m[1].slice(0, 3).toLowerCase()];
+  const endMon   = MONTHS[m[3].slice(0, 3).toLowerCase()];
+  if (!startMon || !endMon) return null;
+  return {
+    startMonth: startMon,
+    startYear:  parseInt(m[2]),
+    endYear:    parseInt(m[4]),
+  };
+}
+
+// Pick the right year for a month based on a statement period that may cross
+// the year boundary (e.g. Dec 2024 → Jan 2025). Falls back to inferYear() if
+// no period was found.
+function yearForMonth(mon, period, fallbackYear) {
+  if (period && period.startYear !== period.endYear) {
+    return mon >= period.startMonth ? period.startYear : period.endYear;
+  }
+  return period ? period.startYear : fallbackYear;
+}
+
 function monthDayToISO(raw, year) {
   const m = raw.match(/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})/i);
   if (!m) return null;
@@ -127,41 +154,64 @@ function parseCIBCChequing(text, account) {
   return results;
 }
 
-// Scotiabank Credit:
-//   "Mar 15  Mar 16  MERCHANT NAME  12.45"          (two date columns — transaction + posting)
-//   "Mar 15  Mar 16  PAYMENT - MERCI  500.00-"      (trailing minus = credit)
-//   "Mar 15  MERCHANT  12.45 CR"                    (single date — older statements)
-//   "03/15/24  MERCHANT  12.45-"                    (slash dates)
+// Scotiabank Credit Card — Visa Infinite, Momentum, Gold etc.
+// Real extracted format (one transaction per line):
+//   "001 Dec 21 Dec 21 AMZN Mktp CA*2P5FM3DW3 866-216-1072 19.20ON"
+//   "002 Dec 21 Dec 22 AMZN Mktp CA*2E5RC3PH3 866-216-1072 ON 19.20"
+//   "003 Dec 23 Dec 24 T&T SUPERMARKET #028 WATERLOO ON 102.48"
+// Layout: [optional ref#] <txn-date> <post-date> <description> <amount>[<province>]
+// The 2-letter province code may be glued to the amount or precede it.
+// Trailing "-" or "CR" indicates a credit/payment.
 function parseScotiaCredit(text, account) {
-  const year  = inferYear(text);
-  const lines = text.split('\n');
-  const results = [];
-  const MON = 'jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec';
+  const period   = inferPeriod(text);
+  const fallback = inferYear(text);
+  const lines    = text.split('\n');
+  const results  = [];
+  const MON      = '(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.?';
+
+  // Detect cross-year statements without an explicit period header
+  let lastMon = null, yearOffset = 0;
 
   for (const line of lines) {
     if (SKIP.test(line)) continue;
 
-    // Two-date columns (most common Scotiabank layout)
-    let m = line.match(
-      new RegExp(`^((?:${MON})[a-z]*\\.?\\s+\\d{1,2})\\s+(?:${MON})[a-z]*\\.?\\s+\\d{1,2}\\s+(.+?)\\s+\\$?([\\d,]+\\.\\d{2})\\s*([-]|cr)?\\s*$`, 'i')
+    // Two-date column with optional reference number prefix and optional
+    // 2-letter province glued or preceding the amount, optional - / CR suffix
+    const m = line.match(
+      new RegExp(
+        `^(?:\\d{1,4}\\s+)?` +                        // optional ref# (001, 002, ...)
+        `(${MON})\\s+(\\d{1,2})\\s+` +                // transaction date
+        `${MON}\\s+\\d{1,2}\\s+` +                    // posting date
+        `(.+?)\\s+` +                                 // description (lazy)
+        `\\$?([\\d,]+\\.\\d{2})` +                    // amount
+        `([A-Z]{2})?` +                               // optional glued province (e.g. "19.20ON")
+        `\\s*([-]|cr)?\\s*$`,                         // optional credit indicator
+        'i'
+      )
     );
-
-    // Single date with month name
-    if (!m) m = line.match(
-      new RegExp(`^((?:${MON})[a-z]*\\.?\\s+\\d{1,2}(?:,?\\s*\\d{4})?)\\s+(.+?)\\s+\\$?([\\d,]+\\.\\d{2})\\s*([-]|cr)?\\s*$`, 'i')
-    );
-
-    // Slash date
-    if (!m) m = line.match(/^(\d{2}\/\d{2}\/\d{2,4})\s+(.+?)\s+\$?([\d,]+\.\d{2})\s*([-]|cr)?\s*$/i);
-
     if (!m) continue;
 
-    const date = m[1].includes('/') ? slashDateToISO(m[1]) : monthDayToISO(m[1], year);
-    if (!date) continue;
-    const amt = parseAmt(m[3]);
+    const monStr = m[1].slice(0, 3).toLowerCase();
+    const mon    = MONTHS[monStr];
+    const day    = parseInt(m[2]);
+    if (!mon) continue;
+
+    // Pick a year — use statement period if available, otherwise detect Dec→Jan jumps
+    if (lastMon !== null && mon < lastMon - 6) yearOffset++;
+    lastMon = mon;
+    const year = period
+      ? yearForMonth(mon, period, fallback)
+      : fallback + yearOffset;
+
+    const date = `${year}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+    let description = m[3].trim();
+    if (m[5]) description = `${description} ${m[5]}`; // glued province goes back into description
+    const amt = parseAmt(m[4]);
     if (!amt) continue;
-    const isCredit = !!m[4]; // trailing `-` or `CR` = credit/payment to card
-    results.push(mkTx(date, m[2], isCredit ? amt : -amt, account));
+    const isCredit = !!m[6];
+
+    results.push(mkTx(date, description, isCredit ? amt : -amt, account));
   }
   return results;
 }

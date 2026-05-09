@@ -357,12 +357,27 @@ export default function Import() {
 
         {pdfDebug && (
           <div className="mt-4">
-            <button
-              className="btn btn-outline btn-sm"
-              onClick={() => setShowDebug(!showDebug)}
-            >
-              {showDebug ? '▾ Hide extracted text' : '▸ Show extracted text (debug)'}
-            </button>
+            <div className="flex gap-2 center">
+              <button
+                className="btn btn-outline btn-sm"
+                onClick={() => setShowDebug(!showDebug)}
+              >
+                {showDebug ? '▾ Hide extracted text' : '▸ Show extracted text (debug)'}
+              </button>
+              <button
+                className="btn btn-outline btn-sm"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(pdfDebug);
+                    showToast('Extracted text copied to clipboard');
+                  } catch {
+                    showToast('Copy failed — open the textarea and use Ctrl+A, Ctrl+C', 'err');
+                  }
+                }}
+              >
+                📋 Copy to clipboard
+              </button>
+            </div>
             {showDebug && (
               <textarea
                 readOnly
