@@ -127,39 +127,12 @@ function parseCIBCChequing(text, account) {
   return results;
 }
 
-// Scotiabank Credit: "Jan 15, 2024 MERCHANT $123.45" or "01/15/2024 MERCHANT $123.45"
+// Scotiabank Credit:
+//   "Mar 15  Mar 16  MERCHANT NAME  12.45"          (two date columns — transaction + posting)
+//   "Mar 15  Mar 16  PAYMENT - MERCI  500.00-"      (trailing minus = credit)
+//   "Mar 15  MERCHANT  12.45 CR"                    (single date — older statements)
+//   "03/15/24  MERCHANT  12.45-"                    (slash dates)
 function parseScotiaCredit(text, account) {
-  const year  = inferYear(text);
-  const lines = text.split('\n');
-  const results = [];
-
-  for (const line of lines) {
-    if (SKIP.test(line)) continue;
-    // Month-name format
-    let m = line.match(/^([A-Za-z]+\.?\s+\d{1,2},?\s*\d{0,4})\s+(.+?)\s+\$?([\d,]+\.\d{2})\s*(cr)?$/i);
-    if (m) {
-      const date = monthDayToISO(m[1], year) || slashDateToISO(m[1]);
-      if (!date) continue;
-      const amt = parseAmt(m[3]);
-      if (!amt) continue;
-      results.push(mkTx(date, m[2], m[4] ? amt : -amt, account));
-      continue;
-    }
-    // Slash-date format
-    m = line.match(/^(\d{2}\/\d{2}\/\d{2,4})\s+(.+?)\s+\$?([\d,]+\.\d{2})\s*(cr)?$/i);
-    if (m) {
-      const date = slashDateToISO(m[1]);
-      if (!date) continue;
-      const amt = parseAmt(m[3]);
-      if (!amt) continue;
-      results.push(mkTx(date, m[2], m[4] ? amt : -amt, account));
-    }
-  }
-  return results;
-}
-
-// Scotiabank Chequing: "Jan 15 MERCHANT 123.45 1,234.56" (last col = balance)
-function parseScotiaChequing(text, account) {
   const year  = inferYear(text);
   const lines = text.split('\n');
   const results = [];
@@ -167,18 +140,73 @@ function parseScotiaChequing(text, account) {
 
   for (const line of lines) {
     if (SKIP.test(line)) continue;
-    // Two amount cols: transaction amount + running balance
-    const m = line.match(
-      new RegExp(`^((?:${MON})[a-z]*\\.?\\s+\\d{1,2})\\s+(.+?)\\s+([\\d,]+\\.\\d{2})\\s+[\\d,]+\\.\\d{2}$`, 'i')
+
+    // Two-date columns (most common Scotiabank layout)
+    let m = line.match(
+      new RegExp(`^((?:${MON})[a-z]*\\.?\\s+\\d{1,2})\\s+(?:${MON})[a-z]*\\.?\\s+\\d{1,2}\\s+(.+?)\\s+\\$?([\\d,]+\\.\\d{2})\\s*([-]|cr)?\\s*$`, 'i')
     );
+
+    // Single date with month name
+    if (!m) m = line.match(
+      new RegExp(`^((?:${MON})[a-z]*\\.?\\s+\\d{1,2}(?:,?\\s*\\d{4})?)\\s+(.+?)\\s+\\$?([\\d,]+\\.\\d{2})\\s*([-]|cr)?\\s*$`, 'i')
+    );
+
+    // Slash date
+    if (!m) m = line.match(/^(\d{2}\/\d{2}\/\d{2,4})\s+(.+?)\s+\$?([\d,]+\.\d{2})\s*([-]|cr)?\s*$/i);
+
     if (!m) continue;
-    const date = monthDayToISO(m[1], year);
+
+    const date = m[1].includes('/') ? slashDateToISO(m[1]) : monthDayToISO(m[1], year);
     if (!date) continue;
     const amt = parseAmt(m[3]);
     if (!amt) continue;
-    // Determine debit vs credit from description keywords
-    const isDeposit = /deposit|payroll|credit|e-transfer.*received/i.test(m[2]);
-    results.push(mkTx(date, m[2], isDeposit ? amt : -amt, account));
+    const isCredit = !!m[4]; // trailing `-` or `CR` = credit/payment to card
+    results.push(mkTx(date, m[2], isCredit ? amt : -amt, account));
+  }
+  return results;
+}
+
+// Scotiabank Chequing — uses balance delta to infer sign, falls back to keywords
+//   "Mar 15  TIM HORTONS         12.45            1,234.56"   (withdrawal)
+//   "Mar 16  PAYROLL                    3,000.00  4,234.56"   (deposit)
+// PDF text extraction collapses empty columns, so both look like:
+//   "Mar 15 TIM HORTONS 12.45 1,234.56"
+// We track the running balance across lines; if balance went up it's a deposit.
+function parseScotiaChequing(text, account) {
+  const year  = inferYear(text);
+  const lines = text.split('\n');
+  const results = [];
+  const MON = 'jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec';
+  const KW_DEPOSIT = /deposit|payroll|credit|refund|interest paid|e-?transfer.*receiv|pay.*receiv|govt|gst|cra/i;
+
+  let prevBalance = null;
+
+  for (const line of lines) {
+    if (SKIP.test(line)) continue;
+
+    // <date> <description> <amount> <balance>
+    const m = line.match(
+      new RegExp(`^((?:${MON})[a-z]*\\.?\\s+\\d{1,2}(?:,?\\s*\\d{4})?)\\s+(.+?)\\s+\\$?([\\d,]+\\.\\d{2})\\s+\\$?([\\d,]+\\.\\d{2})\\s*$`, 'i')
+    );
+    if (!m) continue;
+
+    const date = monthDayToISO(m[1], year);
+    if (!date) continue;
+    const amt     = parseAmt(m[3]);
+    const balance = parseAmt(m[4]);
+    if (!amt) continue;
+
+    let signed;
+    if (prevBalance !== null) {
+      // Balance delta is the most reliable signal
+      signed = balance > prevBalance ? amt : -amt;
+    } else {
+      // First row — fall back to keyword detection
+      signed = KW_DEPOSIT.test(m[2]) ? amt : -amt;
+    }
+
+    results.push(mkTx(date, m[2], signed, account));
+    prevBalance = balance;
   }
   return results;
 }

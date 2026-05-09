@@ -62,6 +62,8 @@ export default function Import() {
   const [csvPreview, setCsvPreview] = useState(null);
   const [pdfPreview, setPdfPreview] = useState(null);
   const [pdfStatus,  setPdfStatus]  = useState('');
+  const [pdfDebug,   setPdfDebug]   = useState('');         // last extracted text
+  const [showDebug,  setShowDebug]  = useState(false);
   const [pdfProcessing, setPdfProcessing] = useState(false);
   const [isDragging, setDragging]   = useState(false);
   const [isPdfDrag,  setPdfDrag]    = useState(false);
@@ -107,24 +109,29 @@ export default function Import() {
     setPdfProcessing(true);
     setPdfStatus('');
     setPdfPreview(null);
+    setShowDebug(false);
 
     const all = [];
+    const debugChunks = [];
 
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         setPdfStatus(`Processing "${file.name}" (${i + 1} / ${files.length})…`);
         const text = await extractPDFText(file);
+        debugChunks.push(`══════ ${file.name} ══════\n${text}`);
         const parsed = parsePDFByBank(text, bankKey);
         all.push(...parsed);
       }
 
+      setPdfDebug(debugChunks.join('\n\n'));
+
       if (!all.length) {
-        setPdfStatus(`⚠ No transactions found in ${files.length > 1 ? 'any of the' : 'the'} PDF${files.length > 1 ? 's' : ''}. Check the bank selection and ensure the PDF contains selectable text.`);
+        setPdfStatus(`⚠ No transactions found in ${files.length > 1 ? 'any of the' : 'the'} PDF${files.length > 1 ? 's' : ''}. Open the extracted text below to see what was parsed — the regex may need tweaking for your statement format.`);
         return;
       }
 
-      setPdfStatus('');
+      setPdfStatus(`✓ Extracted ${all.length} transaction${all.length !== 1 ? 's' : ''} from ${files.length} file${files.length !== 1 ? 's' : ''}.`);
       setPdfPreview(makePreview(all));
     } catch (e) {
       setPdfStatus(`Error: ${e.message}`);
@@ -341,10 +348,35 @@ export default function Import() {
 
         {pdfStatus && (
           <div
-            className={`mt-4 text-sm ${pdfStatus.startsWith('⚠') ? '' : pdfStatus.startsWith('Error') ? 'text-red' : 'text-muted'}`}
+            className={`mt-4 text-sm ${pdfStatus.startsWith('⚠') ? '' : pdfStatus.startsWith('Error') ? 'text-red' : pdfStatus.startsWith('✓') ? 'text-green' : 'text-muted'}`}
             style={pdfStatus.startsWith('⚠') ? { color: 'var(--yellow)' } : {}}
           >
             {pdfStatus}
+          </div>
+        )}
+
+        {pdfDebug && (
+          <div className="mt-4">
+            <button
+              className="btn btn-outline btn-sm"
+              onClick={() => setShowDebug(!showDebug)}
+            >
+              {showDebug ? '▾ Hide extracted text' : '▸ Show extracted text (debug)'}
+            </button>
+            {showDebug && (
+              <textarea
+                readOnly
+                value={pdfDebug}
+                style={{
+                  width: '100%', minHeight: '300px', marginTop: '8px',
+                  fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
+                  fontSize: '11px', lineHeight: 1.5, whiteSpace: 'pre',
+                  background: 'var(--surface2)', color: 'var(--text)',
+                  border: '1px solid var(--border)', borderRadius: '8px', padding: '12px',
+                  resize: 'vertical',
+                }}
+              />
+            )}
           </div>
         )}
 
